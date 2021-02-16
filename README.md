@@ -2,7 +2,7 @@
 
 ### Requirements
 
-* libsystemd
+* libsystemd / libelogind
 * libcurl
 * c compiler, pkgconf, meson and ninja to build
 
