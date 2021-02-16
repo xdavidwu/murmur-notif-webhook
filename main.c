@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <systemd/sd-bus.h>
 
+#include "webhook.h"
 #include "util.h"
 
 struct mnw_channel {
@@ -28,6 +29,7 @@ struct mnw_state {
 	sd_bus *bus;
 	sd_bus_slot *started_slot, *stopped_slot;
 	struct list *servers;
+	struct webhook_state *webhook;
 };
 
 struct mnw_state global_state = {0};
@@ -98,9 +100,17 @@ static int handle_players(sd_bus_message *msg, struct mnw_server *server_state) 
 			if (player->session == session) {
 				found = 1;
 				if (channel != player->channel->id) {
-					printf("%s moved from %s to %s\n",
+					char *buf = calloc(17 + strlen(name) +
+						strlen(player->channel->name) +
+						strlen(player_channel->name),
+						sizeof(char));
+					assert(buf);
+					sprintf(buf, "%s moved from %s to %s",
 						name, player->channel->name,
 						player_channel->name);
+					puts(buf);
+					webhook_send(global_state.webhook, buf);
+					free(buf);
 					player->channel = player_channel;
 				}
 				break;
@@ -109,7 +119,14 @@ static int handle_players(sd_bus_message *msg, struct mnw_server *server_state) 
 		if (!found) {
 			struct mnw_player *player = calloc(1,
 				sizeof(struct mnw_player));
-			printf("%s joined %s\n", name, player_channel->name);
+			char *buf = calloc(9 + strlen(name) +
+				strlen(player_channel->name), sizeof(char));
+			assert(buf);
+			sprintf(buf, "%s joined %s", name,
+				player_channel->name);
+			puts(buf);
+			webhook_send(global_state.webhook, buf);
+			free(buf);
 			assert(player);
 			player->session = session;
 			player->name = strdup(name);
@@ -162,7 +179,12 @@ static int handle_player_disconnected(sd_bus_message *msg, void *userdata,
 		struct mnw_player *player = ptr->data;
 		if (player->session == session) {
 			found = 1;
-			printf("%s disconnected\n", player->name);
+			char *buf = calloc(14 + strlen(player->name),
+				sizeof(char));
+			sprintf(buf, "%s disconnected", player->name);
+			puts(buf);
+			webhook_send(global_state.webhook, buf);
+			free(buf);
 			free(player->name);
 			free(player);
 			list_remove(server_state->players, ptr);
@@ -455,6 +477,8 @@ static int handle_booted_servers(sd_bus_message *msg) {
 }
 
 int main(int argc, char *argv[]) {
+	assert(getenv("MNW_WEBHOOK"));
+	global_state.webhook = webhook_setup();
 	global_state.servers = list_new();
 	int res;
 	sd_bus_error err = SD_BUS_ERROR_NULL;
